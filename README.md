@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="screenshots/logo.png" width="140" height="140" alt="Astra Music Logo" style="border-radius: 28px;" />
+</p>
+
 # Astra Windows Music App 🎵
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.13+-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
