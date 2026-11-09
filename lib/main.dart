@@ -18,6 +18,7 @@ Future<void> main() async {
   final settings = SettingsStore(prefs);
   final library = LibraryRepository(prefs, settings);
   final player = PlayerController(prefs, settings);
+  player.library = library;
   final jobs = JobController(prefs, settings);
   final playlists = PlaylistStore(prefs);
   await player.init();

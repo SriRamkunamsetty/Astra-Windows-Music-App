@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../data/library_repository.dart';
 import '../data/settings_store.dart';
 import '../data/track.dart';
 
@@ -34,6 +36,7 @@ class PlayerController extends ChangeNotifier {
   // ignore: unused_field
   final SettingsStore _settings;
   final player = AudioPlayer();
+  LibraryRepository? library;
 
   List<Track> queue = const [];
   String from = 'Library';
@@ -142,12 +145,12 @@ class PlayerController extends ChangeNotifier {
     try {
       final t = list[start];
       final src = _sourceForTrack(t);
-      await player.stop();
-      await player.setSource(src);
-      if (at > Duration.zero) await player.seek(at);
       if (autoplay) {
-        await player.resume();
+        await player.play(src, position: at > Duration.zero ? at : null);
         playing = true;
+      } else {
+        await player.setSource(src);
+        if (at > Duration.zero) await player.seek(at);
       }
       notifyListeners();
     } catch (e) {
@@ -192,45 +195,107 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> next() async {
-    if (queue.isEmpty) return;
+    if (queue.isEmpty) {
+      final all = library?.tracks ?? const [];
+      if (all.isNotEmpty) {
+        await playList(all, 0, from: 'Library');
+      }
+      return;
+    }
+
     final cur = index ?? 0;
+
+    // Handle shuffle mode when multiple songs exist in the queue
+    if (shuffle && queue.length > 1) {
+      final candidates = [for (var i = 0; i < queue.length; i++) if (i != cur) i];
+      if (candidates.isNotEmpty) {
+        final nextIdx = candidates[math.Random().nextInt(candidates.length)];
+        await _playIndex(nextIdx);
+        return;
+      }
+    }
+
+    // Advance to next song in the active queue
     if (cur < queue.length - 1) {
       await _playIndex(cur + 1);
-    } else if (repeat == Repeat.all) {
+      return;
+    }
+
+    // At the end of the active queue (or single-track queue)
+    if (repeat == Repeat.all || queue.length > 1) {
+      // Loop back to the beginning of the queue
       await _playIndex(0);
+      return;
+    }
+
+    // If queue only has 1 track (e.g. played directly from search), continue with library
+    final all = library?.tracks ?? const [];
+    if (all.isNotEmpty) {
+      final currentKey = queue[cur].key;
+      final libIdx = all.indexWhere((t) => t.key == currentKey);
+      final nextLibIdx = (libIdx >= 0 && libIdx < all.length - 1) ? libIdx + 1 : 0;
+      await playList(all, nextLibIdx, from: 'Library');
+    } else {
+      seek(Duration.zero);
     }
   }
 
   Future<void> prev() async {
-    if (queue.isEmpty) return;
+    if (queue.isEmpty) {
+      final all = library?.tracks ?? const [];
+      if (all.isNotEmpty) {
+        await playList(all, 0, from: 'Library');
+      }
+      return;
+    }
+
+    // If past 3 seconds, standard music player behavior is to seek to track start
     if (position.value > const Duration(seconds: 3)) {
       seek(Duration.zero);
       return;
     }
+
     final cur = index ?? 0;
     if (cur > 0) {
       await _playIndex(cur - 1);
+      return;
+    }
+
+    // At the start of the queue
+    if (queue.length > 1) {
+      await _playIndex(queue.length - 1);
+      return;
+    }
+
+    // If queue only has 1 track, pick previous from library
+    final all = library?.tracks ?? const [];
+    if (all.isNotEmpty) {
+      final currentKey = queue[cur].key;
+      final libIdx = all.indexWhere((t) => t.key == currentKey);
+      final prevLibIdx = libIdx > 0 ? libIdx - 1 : all.length - 1;
+      await playList(all, prevLibIdx, from: 'Library');
     } else {
       seek(Duration.zero);
     }
   }
 
   Future<void> _playIndex(int i) async {
+    if (queue.isEmpty) return;
     index = i.clamp(0, queue.length - 1);
     final t = queue[index!];
     _duration = t.duration;
     position.value = Duration.zero;
     notifyListeners();
     try {
-      await player.stop();
-      await player.setSource(_sourceForTrack(t));
-      await player.resume();
+      final src = _sourceForTrack(t);
+      await player.play(src);
       playing = true;
       _recordPlay();
       _saveSession(force: true);
       notifyListeners();
     } catch (e) {
       toast.value = "Couldn't open ${t.title}";
+      debugPrint("Audio error: $e");
     }
   }
 
@@ -378,9 +443,12 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> restore(dynamic library) async {
+  Future<void> restore(dynamic lib) async {
     try {
-      final tracks = library.tracks as List<Track>;
+      if (lib is LibraryRepository) {
+        library = lib;
+      }
+      final tracks = (lib.tracks as List).cast<Track>();
       restoreSession(tracks);
     } catch (_) {}
   }

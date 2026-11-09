@@ -149,7 +149,10 @@ class HomeScreen extends StatelessWidget {
                       children: [
                         SongRow(
                           track: t,
-                          onTap: () => p.playList(recentTracks, i, from: 'Library Songs'),
+                          onTap: () {
+                            final idx = lib.tracks.indexOf(t);
+                            p.playList(lib.tracks, idx >= 0 ? idx : i, from: 'Library Songs');
+                          },
                           onMore: (c) => showTrackMenu(c, t),
                         ),
                         if (i < recentTracks.length - 1) const Hairline(indent: 68),
